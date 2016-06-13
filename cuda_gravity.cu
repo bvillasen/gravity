@@ -17,8 +17,9 @@ __global__ void FFT_divideK2_kernel( cudaP *kxfft, cudaP *kyfft, cudaP *kzfft,
 
 __global__ void iterPoissonStep(  const int paridad,
 				 const int nX, const int nY, const int nZ,
-         const cudaP dx2, const cudaP dy2, const cudaP dz2,
-         const cudaP dAll, const cudaP omega, const cudaP pi4,
+         const cudaP Dx, const cudaP Dy, const cudaP Dz,
+         const cudaP Drho, const cudaP dx2,
+				 const cudaP omega, const cudaP pi4,
 				 cudaP* rho_all, cudaP* phi_all, int* converged ){
   int t_j = 2*(blockIdx.x*blockDim.x + threadIdx.x);
   int t_i = blockIdx.y*blockDim.y + threadIdx.y;
@@ -49,8 +50,9 @@ __global__ void iterPoissonStep(  const int paridad,
 	phi_b = phi_all[ t_j + t_i*nX + b_indx*nX*blockDim.y*gridDim.y ];
 	phi_t = phi_all[ t_j + t_i*nX + t_indx*nX*blockDim.y*gridDim.y ];
 
-  phi_new = (1-omega)*phi_c + omega/6*( phi_l + phi_r + phi_d + phi_u + phi_b + phi_t - dx2*pi4*rho );
-	// phi_new = (1-omega)*phi_c + omega*( dx*( phi_r + phi_l ) + dy*( phi_d + phi_u) + dz*( phi_b + phi_t ) - dAll*pi4*rho );
+  // phi_new = (1-omega)*phi_c + omega/6*( phi_l + phi_r + phi_d + phi_u + phi_b + phi_t - dx2*rho );
+
+	phi_new = (1-omega)*phi_c + omega*( Dx*( phi_r + phi_l ) + Dy*( phi_d + phi_u) + Dz*( phi_b + phi_t ) - Drho*rho );
 	phi_all[ tid ] = phi_new;
 
 

@@ -3,7 +3,7 @@ import numpy as np
 import pycuda.driver as cuda
 from pycuda.compiler import SourceModule
 import pycuda.gpuarray as gpuarray
-import pycuda.cumath as cumath
+# import pycuda.cumath as cumath
 #import pycuda.curandom as curandom
 from pycuda.elementwise import ElementwiseKernel
 from pycuda.reduction import ReductionKernel
@@ -36,14 +36,22 @@ cudaPre, cudaPreComplex = precision[cudaP]
 #Initialize MPI
 MPIcomm = MPI.COMM_WORLD
 pId = MPIcomm.Get_rank()
-nProc = MPIcomm.Get_size()
+nProcess = MPIcomm.Get_size()
 name = MPI.Get_processor_name()
 
 if pId == 0:
-  print "\nMPI-CUDA nBoby"
-  print " nProcess: {0}\n".format(nProc)
+  print "\nMPI-CUDA 3D POISOON SOLVER"
+  print " nProcess: {0}\n".format(nProcess)
 MPIcomm.Barrier()
-print "[pId {0}] Host: {1}".format( pId, name )
+
+
+
+
+for i in range(nProcess):
+  if pId == i:
+    print "[pId {0}] Host: {1}".format( pId, name )
+  MPIcomm.Barrier()
+
 
 
 #set simulation volume dimentions
@@ -52,8 +60,8 @@ nHeight = nPoints
 nDepth = nPoints
 nData = nWidth*nHeight*nDepth
 
-Lx = 1.
-Ly = 1.
+Lx = 2.
+Ly = 2.
 Lz = 1.
 xMax, xMin = Lx/2, -Lx/2
 yMax, yMin = Ly/2, -Ly/2
@@ -80,10 +88,13 @@ phi_teo = np.exp( -r2/(2*sigma**2) )
 
 
 #Change precision of the parameters
-delta = 2*( dx*dx + dy*dy + dz*dz )
-dx2, dy2, dz2 = cudaPre(dx*dx), cudaPre(dy*dy), cudaPre(dz*dz)
-# delta_x, delta_y, delta_z = cudaPre(dy*dy*dz*dz/delta), cudaPre(dx*dx*dz*dz/delta), cudaPre(dx*dx*dy*dy/delta)
-delta_all = cudaPre( dx*dx*dy*dy*dz*dz/delta )
+dx, dy, dz = cudaPre(dx), cudaPre(dy), cudaPre(dz)
+dx2, dy2, dz2 = dx*dx, dy*dy, dz*dz
+D = 2*(dy2*dz2 + dx2*dz2 + dx2*dy2);
+Dx = dy2*dz2/D
+Dy = dx2*dz2/D
+Dz = dx2*dy2/D
+Drho = dx2*dy2*dz2/D
 # Lx, Ly, Lz = cudaPre(Lx), cudaPre(Ly), cudaPre(Lz)
 # xMin, yMin, zMin = cudaPre(xMin), cudaPre(yMin), cudaPre(zMin)
 pi4 = cudaPre( 4*np.pi )
@@ -103,7 +114,7 @@ nBlocks3D = grid3D[0]*grid3D[1]*grid3D[2]
 grid3D_poisson = (gridx//2, gridy, gridz)
 
 
-print "\nCompiling CUDA code"
+if pId == 0: print "\nCompiling CUDA code"
 cudaCodeFile = open("cuda_gravity.cu","r")
 cudaCodeString = cudaCodeFile.read().replace( "cudaP", cudaP )
 cudaCode = SourceModule(cudaCodeString)
@@ -116,7 +127,7 @@ convertToUCHAR = ElementwiseKernel(arguments="cudaP normaliztion, cudaP *values,
 def poisonIteration( parity, omega ):
   iterPoissonStep_kernel( np.int32(parity),
   np.int32( nWidth ), np.int32( nHeight ), np.int32( nDepth ),
-  dx2, dy2, dz2, delta_all, cudaPre(omega), pi4,
+  Dx, Dy, Dz, Drho, dx2, cudaPre(omega), pi4,
   rho_d, phi_d, converged, grid=grid3D_poisson, block=block3D  )
 
 rJacobi = ( np.cos(np.pi/nWidth) + (dx/dy)**2*np.cos(np.pi/nHeight) ) / ( 1 + (dx/dy)**2 )
@@ -147,8 +158,9 @@ def solvePoisson( show=False ):
 
 ########################################################################
 ########################################################################
-print "\nInitializing Data"
-initialMemory = getFreeMemory( show=True )
+if pId == 0:
+  print "\nInitializing Data"
+  initialMemory = getFreeMemory( show=True )
 rho = np.zeros( X.shape, dtype=cudaPre )  #density
 #####################################################
 #Initialize a centerd sphere
@@ -179,22 +191,24 @@ start, end = cuda.Event(), cuda.Event()
 start.record() # start timing
 phi = solvePoisson( show=True )
 phi = phi - phi.min()
-phi = phi/phi.max()
+# print phi.max()
+# phi = phi/phi.max()
 end.record(), end.synchronize()
 secs = start.time_till( end )*1e-3
 print 'Time: {0:0.4f}\n'.format( secs )
 
-phi_slide_teo = phi_teo[nWidth/2,:,:]
+phi_slide_teo = phi_teo[nDepth/2,:,:]
+extent = [xMin, xMax, yMin, yMax]
 plt.figure(0)
 plt.clf()
-plt.imshow(phi_slide_teo, interpolation='nearest')
+plt.imshow(phi_slide_teo, extent=extent, interpolation='nearest')
 plt.colorbar()
 # plt.show()
 
-phi_slide = phi[nWidth/2,:,:]
+phi_slide = phi[nDepth/2,:,:]
 plt.figure(2)
 plt.clf()
-plt.imshow(phi_slide, interpolation='nearest')
+plt.imshow(phi_slide, extent=extent, interpolation='nearest')
 plt.colorbar()
 # plt.show()
 
@@ -213,5 +227,7 @@ cudaCtx.pop()
 cudaCtx.detach() #delete it
 #Terminate MPI
 MPIcomm.Barrier()
+for i in range(nProcess):
+  if pId == i: print "##########################################################END-{0}".format(pId)
+  MPIcomm.Barrier()
 MPI.Finalize()
-print "##########################################################END-{0}".format(pId)
