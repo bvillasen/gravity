@@ -160,7 +160,7 @@ def solvePoisson( show=False ):
 ########################################################################
 if pId == 0:
   print "\nInitializing Data"
-  initialMemory = getFreeMemory( show=True )
+initialMemory = getFreeMemory( show=True )
 rho = np.zeros( X.shape, dtype=cudaPre )  #density
 #####################################################
 #Initialize a centerd sphere
@@ -197,27 +197,27 @@ end.record(), end.synchronize()
 secs = start.time_till( end )*1e-3
 print 'Time: {0:0.4f}\n'.format( secs )
 
-phi_slide_teo = phi_teo[nDepth/2,:,:]
-extent = [xMin, xMax, yMin, yMax]
-plt.figure(0)
-plt.clf()
-plt.imshow(phi_slide_teo, extent=extent, interpolation='nearest')
-plt.colorbar()
+# phi_slide_teo = phi_teo[nDepth/2,:,:]
+# extent = [xMin, xMax, yMin, yMax]
+# plt.figure(0)
+# plt.clf()
+# plt.imshow(phi_slide_teo, extent=extent, interpolation='nearest')
+# plt.colorbar()
+# # plt.show()
+#
+# phi_slide = phi[nDepth/2,:,:]
+# plt.figure(2)
+# plt.clf()
+# plt.imshow(phi_slide, extent=extent, interpolation='nearest')
+# plt.colorbar()
+# # plt.show()
+#
+# plt.figure(3)
+# plt.clf()
+# plt.imshow(np.abs(phi_slide - phi_slide_teo), interpolation='nearest')
+# plt.colorbar()
 # plt.show()
-
-phi_slide = phi[nDepth/2,:,:]
-plt.figure(2)
-plt.clf()
-plt.imshow(phi_slide, extent=extent, interpolation='nearest')
-plt.colorbar()
-# plt.show()
-
-plt.figure(3)
-plt.clf()
-plt.imshow(np.abs(phi_slide - phi_slide_teo), interpolation='nearest')
-plt.colorbar()
-plt.show()
-
+#
 
 ######################################################################
 #Clean and Finalize
