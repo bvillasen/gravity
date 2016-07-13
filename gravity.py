@@ -151,11 +151,25 @@ def poisonIteration( parity, omega ):
   rho_d, phi_d, converged, grid=grid3D_poisson, block=block3D  )
 
 rJacobi = ( np.cos(np.pi/nWidth) + (dx/dy)**2*np.cos(np.pi/nHeight) ) / ( 1 + (dx/dy)**2 )
+
+def setBounderies( ):
+  global timeTransfer, start, end
+  start.record()
+  setBounderies_kernel( phi_d, bound_l_d, bound_r_d, bound_d_d, bound_u_d, bound_b_d, bound_t_d, grid=grid3D, block=block3D)
+  end.record(), end.synchronize()
+  timeTransfer += start.time_till(end)*1e-3
+
+
 def poissonStep( omega ):
+  global start, end, timeCompute
+  setBounderies()
+  start.record()
   converged.set( one_Array )
   poisonIteration( 0, omega )
   poisonIteration( 1, omega )
   hasConverged = converged.get()[0]
+  end.record(), end.synchronize()
+  timeCompute += start.time_till( end )*1e-3
   return hasConverged
 
 ########################################################################
@@ -208,22 +222,31 @@ rho_FFT_re_d = gpuarray.to_gpu( zeros_h )
 rho_FFT_im_d = gpuarray.to_gpu(zeros_h)
 one_Array = np.array([ 1 ]).astype( np.int32 )
 converged = gpuarray.to_gpu( one_Array )
+bound_l_d = gpuarray.to_gpu( bound_l_h )
+bound_r_d = gpuarray.to_gpu( bound_r_h )
+bound_d_d = gpuarray.to_gpu( bound_d_h )
+bound_u_d = gpuarray.to_gpu( bound_u_h )
+bound_b_d = gpuarray.to_gpu( bound_b_h )
+bound_t_d = gpuarray.to_gpu( bound_t_h )
 if usingAnimation:
   plotData_d = gpuarray.to_gpu(np.zeros([nDepth, nHeight, nWidth], dtype = np.uint8))
   volumeRender.plotData_dArray, copyToScreenArray = gpuArray3DtocudaArray( plotData_d )
 print "Total Global Memory Used: {0:.2f} MB\n".format(float(initialMemory-getFreeMemory( show=False ))/1e6)
 
-# print 'Getting initial Gravity Force...'
-# start, end = cuda.Event(), cuda.Event()
-# start.record() # start timing
-# phi = solvePoisson( show=True )
-# phi = phi - phi.min()
-# # print phi.max()
-# # phi = phi/phi.max()
-# end.record(), end.synchronize()
-# secs = start.time_till( end )*1e-3
-# print 'Time: {0:0.4f}\n'.format( secs )
-#
+print 'Getting initial Gravity Force...'
+timeAll = np.array([ 0, 0 ])
+timeCompute, timeTransfer = 0, 0
+start, end = cuda.Event(), cuda.Event()
+start_1, end_1 = cuda.Event(), cuda.Event()
+start_1.record() # start timing
+phi = solvePoisson( show=True )
+phi = phi - phi.min()
+end_1.record(), end_1.synchronize()
+secs = start_1.time_till( end )*1e-3
+print 'Time: {0:0.4f}'.format( secs )
+print 'Time Compute: {0:0.4f}'.format( timeCompute )
+print 'Time Transfer: {0:0.4f}'.format( timeTransfer )
+
 # # phi_slide_teo = phi_teo[nDepth/2,:,:]
 # # extent = [xMin, xMax, yMin, yMax]
 # # plt.figure(0)
