@@ -144,69 +144,75 @@ convertToUCHAR = ElementwiseKernel(arguments="cudaP normaliztion, cudaP *values,
 			      operation = "psiUCHAR[i] = (unsigned char) ( -255*( values[i]*normaliztion -1 ) );",
 			      name = "sendModuloToUCHAR_kernel")
 
-# def poisonIteration( parity, omega ):
-#   iterPoissonStep_kernel( np.int32(parity),
-#   np.int32( nWidth ), np.int32( nHeight ), np.int32( nDepth ),
-#   Dx, Dy, Dz, Drho, cudaPre(dx2), cudaPre(omega), pi4,
-#   rho_d, phi_d, converged, grid=grid3D_poisson, block=block3D  )
-#
-# rJacobi = ( np.cos(np.pi/nWidth) + (dx/dy)**2*np.cos(np.pi/nHeight) ) / ( 1 + (dx/dy)**2 )
-# def poissonStep( omega ):
-#   converged.set( one_Array )
-#   poisonIteration( 0, omega )
-#   poisonIteration( 1, omega )
-#   hasConverged = converged.get()[0]
-#   return hasConverged
-#
-# ########################################################################
-# def solvePoisson( show=False ):
-#   maxIter = 500000
-#   omega = 2. / ( 1 + np.pi / nWidth  )
-#   # omega = 1
-#   for n in range(maxIter):
-#     hasConverged = poissonStep( omega )
-#     if hasConverged == 1:
-#       phi_1 = phi_d.get()
-#       poisonIteration( 0, omega )
-#       phi_2 = phi_d.get()
-#       phi_avrg = ( phi_1 + phi_2 )/2.
-#       if show: print 'Poisson converged: ', n+1
-#       # return phi_1, phi_2, phi_avrg
-#       return phi_avrg
-#   if show: print 'Poisson converged: ', maxIter
-#   return phi_d.get()
-#
-# ########################################################################
-# ########################################################################
-# if pId == 0:
-#   print "\nInitializing Data"
-# initialMemory = getFreeMemory( show=True )
-# rho = np.zeros( X.shape, dtype=cudaPre )  #density
-# #####################################################
-# #Initialize a centerd sphere
-# overDensity = spheres
-# rho[ overDensity ] = 1.
-# rho[ np.logical_not(overDensity) ] = 0.6
-# rho = rho_teo
-# # phi = np.ones( X.shape, dtype=cudaPre )   #gravity potencial
-# phi = rho   #gravity potencial
-# zeros_h = np.zeros_like( rho )
-# bound_l_h = np.array( )
-# #####################################################
-# #Initialize device global data
-# phi_d = gpuarray.to_gpu( phi )
-# rho_d = gpuarray.to_gpu( rho )
-# rho_re_d = gpuarray.to_gpu( rho )
-# rho_im_d = gpuarray.to_gpu( zeros_h )
-# rho_FFT_re_d = gpuarray.to_gpu( zeros_h )
-# rho_FFT_im_d = gpuarray.to_gpu(zeros_h)
-# one_Array = np.array([ 1 ]).astype( np.int32 )
-# converged = gpuarray.to_gpu( one_Array )
-# if usingAnimation:
-#   plotData_d = gpuarray.to_gpu(np.zeros([nDepth, nHeight, nWidth], dtype = np.uint8))
-#   volumeRender.plotData_dArray, copyToScreenArray = gpuArray3DtocudaArray( plotData_d )
-# print "Total Global Memory Used: {0:.2f} MB\n".format(float(initialMemory-getFreeMemory( show=False ))/1e6)
-#
+def poisonIteration( parity, omega ):
+  iterPoissonStep_kernel( np.int32(parity),
+  np.int32( nWidth ), np.int32( nHeight ), np.int32( nDepth ),
+  Dx, Dy, Dz, Drho, cudaPre(dx2), cudaPre(omega), pi4,
+  rho_d, phi_d, converged, grid=grid3D_poisson, block=block3D  )
+
+rJacobi = ( np.cos(np.pi/nWidth) + (dx/dy)**2*np.cos(np.pi/nHeight) ) / ( 1 + (dx/dy)**2 )
+def poissonStep( omega ):
+  converged.set( one_Array )
+  poisonIteration( 0, omega )
+  poisonIteration( 1, omega )
+  hasConverged = converged.get()[0]
+  return hasConverged
+
+########################################################################
+def solvePoisson( show=False ):
+  maxIter = 500000
+  omega = 2. / ( 1 + np.pi / nWidth  )
+  # omega = 1
+  for n in range(maxIter):
+    hasConverged = poissonStep( omega )
+    if hasConverged == 1:
+      phi_1 = phi_d.get()
+      poisonIteration( 0, omega )
+      phi_2 = phi_d.get()
+      phi_avrg = ( phi_1 + phi_2 )/2.
+      if show: print 'Poisson converged: ', n+1
+      # return phi_1, phi_2, phi_avrg
+      return phi_avrg
+  if show: print 'Poisson converged: ', maxIter
+  return phi_d.get()
+
+########################################################################
+########################################################################
+if pId == 0:
+  print "\nInitializing Data"
+initialMemory = getFreeMemory( show=True )
+rho = np.zeros( X.shape, dtype=cudaPre )  #density
+#####################################################
+#Initialize a centerd sphere
+overDensity = spheres
+rho[ overDensity ] = 1.
+rho[ np.logical_not(overDensity) ] = 0.6
+rho = rho_teo
+# phi = np.ones( X.shape, dtype=cudaPre )   #gravity potencial
+phi = rho   #gravity potencial
+zeros_h = np.zeros_like( rho )
+bound_l_h = np.zeros( [nDepth, nHeight], dtype=cudaPre )
+bound_r_h = np.zeros( [nDepth, nHeight], dtype=cudaPre )
+bound_d_h = np.zeros( [nDepth, nWidth], dtype=cudaPre )
+bound_u_h = np.zeros( [nDepth, nWidth], dtype=cudaPre )
+bound_b_h = np.zeros( [nHeight, nWidth], dtype=cudaPre )
+bound_t_h = np.zeros( [nHeight, nWidth], dtype=cudaPre )
+
+#####################################################
+#Initialize device global data
+phi_d = gpuarray.to_gpu( phi )
+rho_d = gpuarray.to_gpu( rho )
+rho_re_d = gpuarray.to_gpu( rho )
+rho_im_d = gpuarray.to_gpu( zeros_h )
+rho_FFT_re_d = gpuarray.to_gpu( zeros_h )
+rho_FFT_im_d = gpuarray.to_gpu(zeros_h)
+one_Array = np.array([ 1 ]).astype( np.int32 )
+converged = gpuarray.to_gpu( one_Array )
+if usingAnimation:
+  plotData_d = gpuarray.to_gpu(np.zeros([nDepth, nHeight, nWidth], dtype = np.uint8))
+  volumeRender.plotData_dArray, copyToScreenArray = gpuArray3DtocudaArray( plotData_d )
+print "Total Global Memory Used: {0:.2f} MB\n".format(float(initialMemory-getFreeMemory( show=False ))/1e6)
+
 # print 'Getting initial Gravity Force...'
 # start, end = cuda.Event(), cuda.Event()
 # start.record() # start timing
@@ -240,12 +246,12 @@ convertToUCHAR = ElementwiseKernel(arguments="cudaP normaliztion, cudaP *values,
 # # plt.show()
 # #
 #
-# ######################################################################
-# #Clean and Finalize
-# MPIcomm.Barrier()
-# #Terminate CUDA
-# cudaCtx.pop()
-# cudaCtx.detach() #delete it
+######################################################################
+#Clean and Finalize
+MPIcomm.Barrier()
+#Terminate CUDA
+cudaCtx.pop()
+cudaCtx.detach() #delete it
 outFile.close()
 #Terminate MPI
 MPIcomm.Barrier()
