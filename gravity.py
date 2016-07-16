@@ -21,7 +21,7 @@ from tools import ensureDirectory, printProgressTime
 from mpiTools import *
 
 cudaP = "double"
-nPoints = 256
+nPoints = 128
 useDevice = None
 usingAnimation = False
 outDir = '/home_local/bruno/data/gravity/'
@@ -51,6 +51,15 @@ pId_x, pId_y = get_mpi_id_2D( pId, nP_x )
 nP_z = 1
 pId_z = 0
 pParity = (pId_x + pId_y + pId_z) % 2
+
+#Global bounderies
+globalBound_x, globalBound_y, globalBound_z = np.int32(0), np.int32(0), np.int32(0)
+if pId_x == 0 or pId_x == nP_x-1 : globalBound_x = np.int32(1)
+if pId_y == 0 or pId_y == nP_y-1 : globalBound_y = np.int32(1)
+if pId_z == 0 or pId_z == nP_z-1 : globalBound_z = np.int32(1)
+
+
+
 
 out = 'Host: {1}   ( {2} , {3} )'.format( pId, name, pId_x, pId_y )
 print_mpi( out, pId, nProcess, MPIcomm )
@@ -102,7 +111,7 @@ r2 = X*X + Y*Y
 rho_teo = ( r2 - 2*sigma**2 )/sigma**4 * np.exp( -r2/(2*sigma**2) )
 phi_teo = np.exp( -r2/(2*sigma**2) )
 
-stride = 4
+stride = 1
 outFile.create_dataset('rho', data=rho_teo[::stride,::stride,::stride].astype(np.float32))
 outFile.create_dataset('phi_teo', data=phi_teo[::stride,::stride,::stride].astype(np.float32))
 
@@ -146,12 +155,14 @@ convertToUCHAR = ElementwiseKernel(arguments="cudaP normaliztion, cudaP *values,
 			      name = "sendModuloToUCHAR_kernel")
 
 def poisonIteration( parity, omega ):
+  global start_compute, end_compute, timeCompute
+  start_compute.record()
   iterPoissonStep_kernel( np.int32(parity),
-  np.int32( nWidth ), np.int32( nHeight ), np.int32( nDepth ),
   Dx, Dy, Dz, Drho, cudaPre(dx2), cudaPre(omega), pi4,
   rho_d, phi_d, converged,
   bound_l_d, bound_r_d, bound_d_d, bound_u_d, bound_b_d, bound_t_d, grid=grid3D_poisson, block=block3D  )
-
+  end_compute.record(), end_compute.synchronize()
+  timeCompute += start_compute.time_till( end_compute )*1e-3
 # rJacobi = ( np.cos(np.pi/nWidth) + (dx/dy)**2*np.cos(np.pi/nHeight) ) / ( 1 + (dx/dy)**2 )
 
 def transferBounderies():
@@ -181,37 +192,33 @@ def transferBounderies():
     MPIcomm.Send(bound_u_h, dest=pId_u, tag=8)
 
 def setBounderies( ):
-  global timeTransfer, start, end
-  start.record()
+  global timeTransfer, start_transfer, end_tranfer
+  start_transfer.record()
   setBounderies_kernel( phi_d, bound_l_d, bound_r_d, bound_d_d, bound_u_d, bound_b_d, bound_t_d, grid=grid3D, block=block3D)
-  bound_l_h = bound_l_d.get()
-  bound_r_h = bound_r_d.get()
-  bound_d_h = bound_d_d.get()
-  bound_u_h = bound_u_d.get()
-  bound_b_h = bound_b_d.get()
-  bound_t_h = bound_t_d.get()
-  transferBounderies()
-  bound_l_d.set( bound_l_h )
-  bound_r_d.set( bound_r_h )
-  bound_d_d.set( bound_d_h )
-  bound_u_d.set( bound_u_h )
-  bound_b_d.set( bound_b_h )
-  bound_t_d.set( bound_t_h )
-  end.record(), end.synchronize()
-  timeTransfer += start.time_till(end)*1e-3
+  # bound_l_h = bound_l_d.get()
+  # bound_r_h = bound_r_d.get()
+  # bound_d_h = bound_d_d.get()
+  # bound_u_h = bound_u_d.get()
+  # bound_b_h = bound_b_d.get()
+  # bound_t_h = bound_t_d.get()
+  # # transferBounderies()
+  # bound_l_d.set( bound_l_h )
+  # bound_r_d.set( bound_r_h )
+  # bound_d_d.set( bound_d_h )
+  # bound_u_d.set( bound_u_h )
+  # bound_b_d.set( bound_b_h )
+  # bound_t_d.set( bound_t_h )
+  end_tranfer.record(), end_tranfer.synchronize()
+  timeTransfer += start_transfer.time_till(end_tranfer)*1e-3
 
 
 def poissonStep( omega ):
-  global start, end, timeCompute
   setBounderies()
-  start.record()
   converged.set( one_Array )
   poisonIteration( 0, omega )
   setBounderies()
   poisonIteration( 1, omega )
   hasConverged = converged.get()[0]
-  end.record(), end.synchronize()
-  timeCompute += start.time_till( end )*1e-3
   return hasConverged
 
 ########################################################################
@@ -283,13 +290,14 @@ if pId==0: print "Total Global Memory Used: {0:.2f} MB\n".format(float(initialMe
 if pId==0: print 'Getting initial Gravity Force...'
 timeAll = np.array([ 0, 0 ])
 timeCompute, timeTransfer = 0, 0
-start, end = cuda.Event(), cuda.Event()
-start_1, end_1 = cuda.Event(), cuda.Event()
-start_1.record() # start timing
+start_compute, end_compute = cuda.Event(), cuda.Event()
+start_transfer, end_tranfer = cuda.Event(), cuda.Event()
+start_total, end_total = cuda.Event(), cuda.Event()
+start_total.record() # start timing
 phi = solvePoisson( show=True )
 phi = phi - phi.min()
-end_1.record(), end_1.synchronize()
-secs = start_1.time_till( end )*1e-3
+end_total.record(), end_total.synchronize()
+secs = start_total.time_till( end_total )*1e-3
 if pId==0:
   print 'Time: {0:0.4f}'.format( secs )
   print 'Time Compute: {0:0.4f}'.format( timeCompute )
