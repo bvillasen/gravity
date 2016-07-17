@@ -23,7 +23,7 @@ __device__ void writeBound(  const int boundAxis,
 	bound[boundId] = phi[writeId];
 }
 
-__global__ void setBounderies(
+__global__ void setBounderies( int globalBound_x, int globalBound_y, int globalBound_z,
 			 double* phi,
 			 double* bound_l, double* bound_r, double* bound_d, double* bound_u, double* bound_b, double *bound_t ){
 	int t_j = blockIdx.x*blockDim.x + threadIdx.x;
@@ -39,30 +39,36 @@ __global__ void setBounderies(
 
 	int writeId, id_w ;
 
-	if ( t_j==0 )
-		id_w = 1;
+	if ( t_j==0 ){
+		id_w = globalBound_x == 0 ? 0 : 1 ;
 		writeId = id_w + t_i*N_W + t_k*N_W*N_H;
 		writeBound( 1, phi,	bound_l, t_j, t_i, t_k, writeId );
-	if ( t_j==( N_W - 1) )
-		id_w = N_W - 2;
+	}
+	if ( t_j==( N_W - 1) ){
+		id_w = globalBound_x == 0 ? N_W - 1 : N_W - 2;
 		writeId = id_w + t_i*N_W + t_k*N_W*N_H;
 		writeBound( 1, phi, bound_r, t_j, t_i, t_k, writeId );
-	if ( t_i==0 )
-		id_w = 1;
+	}
+	if ( t_i==0 ){
+		id_w = globalBound_y == 0 ? 0 : 1;
 		writeId = t_j + id_w*N_W + t_k*N_W*N_H;
 		writeBound( 2, phi, bound_d, t_j, t_i, t_k, writeId );
-	if ( t_i==( N_H - 1 ) )
-		id_w = N_H - 2;
+	}
+	if ( t_i==( N_H - 1 ) ){
+		id_w = globalBound_y == 0 ? N_H - 1 : N_H - 2;
 		writeId = t_j + id_w*N_W + t_k*N_W*N_H;
 		writeBound( 2, phi,	bound_u, t_j, t_i, t_k, writeId );
-	if ( t_k==0 )
-		id_w = 1;
+	}
+	if ( t_k==0 ){
+		id_w = globalBound_z == 0 ? 0 : 1;
 		writeId = t_j + t_i*N_W + id_w*N_W*N_H;
 		writeBound( 3, phi, bound_b, t_j, t_i, t_k, writeId );
-	if ( t_k==( N_D -1 ) )
-		id_w = N_D -2;
+	}
+	if ( t_k==( N_D -1 ) ){
+		id_w = globalBound_z == 0 ? N_D - 1 : N_D - 2;
 		writeId = t_j + t_i*N_W + id_w*N_W*N_H;
 		writeBound( 3, phi,	bound_t, t_j, t_i, t_k, writeId );
+	}
 }
 
 __global__ void iterPoissonStep(  const int paridad,
@@ -119,7 +125,16 @@ __global__ void iterPoissonStep(  const int paridad,
 	phi_new = (1-omega)*phi_c + omega*( Dx*( phi_r + phi_l ) + Dy*( phi_d + phi_u) + Dz*( phi_b + phi_t ) - Drho*rho );
 	phi_all[ tid ] = phi_new;
 
-  if ( ( abs( ( phi_new - phi_c ) / phi_c ) > 0.001 ) ) converged[0] = 0;
+  if ( ( abs( ( phi_new - phi_c )  ) > 1e-6 ) ) converged[0] = 0;
+}
+
+__global__ void copy_kernel( double *data_in, double *data_out ){
+	int t_j = blockIdx.x*blockDim.x + threadIdx.x;
+	int t_i = blockIdx.y*blockDim.y + threadIdx.y;
+	int t_k = blockIdx.z*blockDim.z + threadIdx.z;
+	int tid = t_j + t_i*blockDim.x*gridDim.x + t_k*blockDim.x*gridDim.x*blockDim.y*gridDim.y;
+
+	data_out[tid] = data_in[tid];
 }
 
 __global__ void FFT_divideK2_kernel( double *kxfft, double *kyfft, double *kzfft,

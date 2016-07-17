@@ -54,11 +54,12 @@ pParity = (pId_x + pId_y + pId_z) % 2
 
 #Global bounderies
 globalBound_x, globalBound_y, globalBound_z = np.int32(0), np.int32(0), np.int32(0)
-if pId_x == 0 or pId_x == nP_x-1 : globalBound_x = np.int32(1)
-if pId_y == 0 or pId_y == nP_y-1 : globalBound_y = np.int32(1)
-if pId_z == 0 or pId_z == nP_z-1 : globalBound_z = np.int32(1)
-
-
+if pId_x == 0      : globalBound_x = np.int32(1)
+if pId_x == nP_x-1 : globalBound_x = np.int32(2)
+if pId_y == 0      : globalBound_y = np.int32(1)
+if pId_y == nP_y-1 : globalBound_y = np.int32(2)
+if pId_z == 0      : globalBound_z = np.int32(1)
+if pId_z == nP_z-1 : globalBound_z = np.int32(2)
 
 
 out = 'Host: {1}   ( {2} , {3} )'.format( pId, name, pId_x, pId_y )
@@ -87,23 +88,23 @@ yMax, yMin = Ly/2, -Ly/2
 zMax, zMin = Lz/2, -Lz/2
 Z, Y, X = np.mgrid[ zMin:zMax:nDepth*1j, yMin:yMax:nHeight*1j, xMin:xMax:nWidth*1j ]
 
-#Process volume size
+# #Process volume size
 Lx_p, Ly_p, Lz_p = Lx/nP_x, Ly/nP_y, Lz/nP_z
 xMin_p, xMax_p = xMin + pId_x*Lx_p, xMin + (pId_x+1)*Lx_p
 yMin_p, yMax_p = yMin + pId_y*Ly_p, yMin + (pId_y+1)*Ly_p
 zMin_p, zMax_p = zMin + pId_z*Lz_p, zMin + (pId_z+1)*Lz_p
 dx_p, dy_p, dz_p = Lx_p/(nWidth-1), Ly_p/(nHeight-1), Lz_p/(nDepth-1 )
-Z_p, Y_p, X_p = np.mgrid[ zMin_p:zMax_p:nDepth*1j, yMin_p:yMax_p:nHeight*1j, xMin_p:xMax_p:nWidth*1j ]
-xPoints = X_p[0,0,:]
-yPoints = Y_p[0,:,0]
-zPoints = Z_p[:,0,0]
-R = np.sqrt( X_p*X_p + Y_p*Y_p + Z_p*Z_p )
-sphereR = 0.1
-sphereOffCenter = 0.25
-sphere = np.sqrt( X*X + Y*Y + Z*Z ) < sphereR
-sphere_left  = ( np.sqrt( (X+sphereOffCenter)*(X+sphereOffCenter) + Y*Y + Z*Z ) < sphereR )
-sphere_right = ( np.sqrt( (X-sphereOffCenter)*(X-sphereOffCenter) + Y*Y + Z*Z ) < sphereR )
-spheres = sphere_right + sphere_left
+# Z_p, Y_p, X_p = np.mgrid[ zMin_p:zMax_p:nDepth*1j, yMin_p:yMax_p:nHeight*1j, xMin_p:xMax_p:nWidth*1j ]
+# xPoints = X_p[0,0,:]
+# yPoints = Y_p[0,:,0]
+# zPoints = Z_p[:,0,0]
+# R = np.sqrt( X_p*X_p + Y_p*Y_p + Z_p*Z_p )
+# sphereR = 0.1
+# sphereOffCenter = 0.25
+# sphere = np.sqrt( X*X + Y*Y + Z*Z ) < sphereR
+# sphere_left  = ( np.sqrt( (X+sphereOffCenter)*(X+sphereOffCenter) + Y*Y + Z*Z ) < sphereR )
+# sphere_right = ( np.sqrt( (X-sphereOffCenter)*(X-sphereOffCenter) + Y*Y + Z*Z ) < sphereR )
+# spheres = sphere_right + sphere_left
 
 #For analitical solution
 sigma = 0.2
@@ -149,18 +150,19 @@ cudaCodeString = cudaCodeString.replace('N_DEPTH', str(nDepth) )
 cudaCode = SourceModule(cudaCodeString)
 iterPoissonStep_kernel = cudaCode.get_function('iterPoissonStep')
 setBounderies_kernel = cudaCode.get_function('setBounderies')
+copy_kernel = cudaCode.get_function('copy_kernel')
 ########################################################################
 convertToUCHAR = ElementwiseKernel(arguments="cudaP normaliztion, cudaP *values, unsigned char *psiUCHAR".replace("cudaP", cudaP),
 			      operation = "psiUCHAR[i] = (unsigned char) ( -255*( values[i]*normaliztion -1 ) );",
 			      name = "sendModuloToUCHAR_kernel")
 
-def poisonIteration( parity, omega ):
+def poisonIteration( parity, omega, phi_in ):
   global start_compute, end_compute, timeCompute
   start_compute.record()
   iterPoissonStep_kernel( np.int32(parity),
-  Dx, Dy, Dz, Drho, cudaPre(dx2), cudaPre(omega), pi4,
-  rho_d, phi_d, converged,
-  bound_l_d, bound_r_d, bound_d_d, bound_u_d, bound_b_d, bound_t_d, grid=grid3D_poisson, block=block3D  )
+    Dx, Dy, Dz, Drho, cudaPre(dx2), cudaPre(omega), pi4,
+    rho_d, phi_in, converged,
+    bound_l_d, bound_r_d, bound_d_d, bound_u_d, bound_b_d, bound_t_d, grid=grid3D_poisson, block=block3D  )
   end_compute.record(), end_compute.synchronize()
   timeCompute += start_compute.time_till( end_compute )*1e-3
 # rJacobi = ( np.cos(np.pi/nWidth) + (dx/dy)**2*np.cos(np.pi/nHeight) ) / ( 1 + (dx/dy)**2 )
@@ -191,33 +193,40 @@ def transferBounderies():
     MPIcomm.Recv(bound_d_rcv, source=pId_d, tag=7)
     MPIcomm.Send(bound_u_h, dest=pId_u, tag=8)
 
-def setBounderies( ):
+def setBounderies( phi_in ):
   global timeTransfer, start_transfer, end_tranfer
   start_transfer.record()
-  setBounderies_kernel( phi_d, bound_l_d, bound_r_d, bound_d_d, bound_u_d, bound_b_d, bound_t_d, grid=grid3D, block=block3D)
-  # bound_l_h = bound_l_d.get()
-  # bound_r_h = bound_r_d.get()
-  # bound_d_h = bound_d_d.get()
-  # bound_u_h = bound_u_d.get()
-  # bound_b_h = bound_b_d.get()
-  # bound_t_h = bound_t_d.get()
+  setBounderies_kernel( globalBound_x, globalBound_y, globalBound_z,
+    phi_in, bound_l_d, bound_r_d, bound_d_d, bound_u_d, bound_b_d, bound_t_d, grid=grid3D, block=block3D)
+  bound_l_h = bound_l_d.get()
+  bound_r_h = bound_r_d.get()
+  bound_d_h = bound_d_d.get()
+  bound_u_h = bound_u_d.get()
+  bound_b_h = bound_b_d.get()
+  bound_t_h = bound_t_d.get()
   # # transferBounderies()
-  # bound_l_d.set( bound_l_h )
-  # bound_r_d.set( bound_r_h )
-  # bound_d_d.set( bound_d_h )
-  # bound_u_d.set( bound_u_h )
-  # bound_b_d.set( bound_b_h )
-  # bound_t_d.set( bound_t_h )
+  if globalBound_x == 1: bound_l_d.set( bound_l_h )
+  else: bound_l_d.set( bound_l_h )
+  if globalBound_x == 2: bound_r_d.set( bound_r_h )
+  else: bound_r_d.set( bound_r_h )
+  if globalBound_y == 1: bound_d_d.set( bound_d_h )
+  else: bound_d_d.set( bound_d_h )
+  if globalBound_y == 2: bound_u_d.set( bound_u_h )
+  else: bound_u_d.set( bound_u_h )
+  if globalBound_z == 1: bound_b_d.set( bound_b_h )
+  else: bound_b_d.set( bound_b_h )
+  if globalBound_z == 2: bound_t_d.set( bound_t_h )
+  else: bound_t_d.set( bound_t_h )
   end_tranfer.record(), end_tranfer.synchronize()
   timeTransfer += start_transfer.time_till(end_tranfer)*1e-3
 
 
 def poissonStep( omega ):
-  setBounderies()
+  setBounderies( phi_d )
   converged.set( one_Array )
-  poisonIteration( 0, omega )
-  setBounderies()
-  poisonIteration( 1, omega )
+  poisonIteration( 0, omega, phi_d )
+  setBounderies( phi_d )
+  poisonIteration( 1, omega, phi_d )
   hasConverged = converged.get()[0]
   return hasConverged
 
@@ -230,13 +239,13 @@ def solvePoisson( show=False ):
     hasConverged = poissonStep( omega )
     if hasConverged == 1:
       phi_1 = phi_d.get()
-      poisonIteration( 0, omega )
+      poisonIteration( 0, omega, phi_d )
       phi_2 = phi_d.get()
       phi_avrg = ( phi_1 + phi_2 )/2.
-      if show: print 'Poisson converged: ', n+1
+      if show: print '[pId {0}] Poisson converged: {1}'.format( pId, n+1 )
       # return phi_1, phi_2, phi_avrg
       return phi_avrg
-  if show: print 'Poisson converged: ', maxIter
+  if show: '[pId {0}] Poisson converged: {1}'.format( pId, maxIter )
   return phi_d.get()
 
 ########################################################################
@@ -247,12 +256,12 @@ initialMemory = getFreeMemory( show=True )
 rho = np.zeros( X.shape, dtype=cudaPre )  #density
 #####################################################
 #Initialize a centerd sphere
-overDensity = spheres
-rho[ overDensity ] = 1.
-rho[ np.logical_not(overDensity) ] = 0.6
+# overDensity = spheres
+# rho[ overDensity ] = 1.
+# rho[ np.logical_not(overDensity) ] = 0.6
 rho = rho_teo
 # phi = np.ones( X.shape, dtype=cudaPre )   #gravity potencial
-phi = rho   #gravity potencial
+phi = rho_teo   #gravity potencial
 zeros_h = np.zeros_like( rho )
 bound_l_h = np.zeros( [nDepth, nHeight], dtype=cudaPre )
 bound_r_h = np.zeros( [nDepth, nHeight], dtype=cudaPre )
@@ -268,12 +277,12 @@ bound_b_rcv = np.zeros_like( bound_b_h )
 bound_t_rcv = np.zeros_like( bound_t_h )
 #####################################################
 #Initialize device global data
-phi_d = gpuarray.to_gpu( phi )
 rho_d = gpuarray.to_gpu( rho )
-rho_re_d = gpuarray.to_gpu( rho )
-rho_im_d = gpuarray.to_gpu( zeros_h )
-rho_FFT_re_d = gpuarray.to_gpu( zeros_h )
-rho_FFT_im_d = gpuarray.to_gpu(zeros_h)
+phi_d = gpuarray.to_gpu( phi )
+# rho_re_d = gpuarray.to_gpu( rho )
+# rho_im_d = gpuarray.to_gpu( zeros_h )
+# rho_FFT_re_d = gpuarray.to_gpu( zeros_h )
+# rho_FFT_im_d = gpuarray.to_gpu(zeros_h)
 one_Array = np.array([ 1 ]).astype( np.int32 )
 converged = gpuarray.to_gpu( one_Array )
 bound_l_d = gpuarray.to_gpu( bound_l_h )
